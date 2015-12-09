@@ -137,6 +137,13 @@ wordListHTML ss = _tbody where
   resultSpan True = "<span class=\"label label-success\">O</span>"
   resultSpan False = "<span class=\"label label-danger\">X</span>"
 
+tupleTableHTML :: [(String, String)] -> String
+tupleTableHTML ss = _tbody where
+  _tbody = concat $ fmap _tr ss
+  _tr (x,y) = "<tr>" ++ _td x ++ _td y ++ _td (_button x) ++ "</tr>"
+  _td x = "<td>" ++ x ++ "</td>"
+  _button x = "<button type=\"submit\" class=\"btn btn-xs btn-default\" id=\"load-" ++ x ++ "\">Load</button>"
+
 drawDA :: IORef DA -> IO ()
 drawDA ref = do
   at <- readIORef ref
@@ -298,13 +305,24 @@ mainloop ref = do
     let ps = [(w,accepted at w) | n <- [5], w <- replicateM n (at ^. lenses (Name :: Name "alphabet"))]
     setProp e "innerHTML" $ wordListHTML ps
 
+  withElem "example-table-tbody" $ \e -> do
+    at <- readIORef ref
+    setProp e "innerHTML" $ tupleTableHTML $ fmap (\(x,y,_) -> (x,y)) exampleTable
+
+    forM_ exampleTable $ \(k,_,json) -> do
+      withElem ("load-" ++ k) $ \t -> do
+        onEvent t Click $ \_ -> do
+          let Right auto = fromJSON =<< decodeJSON (toJSString json)
+          writeIORef ref auto
+          mainloop ref
+
   return ()
 
--- test
--- {"final":["q3"],"initial":"q0","transition":[["q0","a","q1"],["q0","b","q2"],["q1","a","q3"],["q2","a","q2"],["q2","b","q3"],["q3","b","q3"]],"alphabet":"ab","state":["q0","q1","q2","q3"]}
-
--- 3x
--- {"final":["q0","q3"],"initial":"q0","transition":[["q0","0","q0"],["q0","1","q1"],["q1","1","q0"],["q1","0","q2"],["q2","0","q1"],["q2","1","q2"]],"alphabet":"01","state":["q0","q1","q2"]}
+exampleTable :: [(String,String,String)]
+exampleTable = [
+  ("exmple1", "NFA", "{\"final\":[\"q3\"],\"initial\":\"q0\",\"transition\":[[\"q0\",\"a\",\"q1\"],[\"q0\",\"b\",\"q2\"],[\"q1\",\"a\",\"q3\"],[\"q2\",\"a\",\"q2\"],[\"q2\",\"b\",\"q3\"],[\"q3\",\"b\",\"q3\"]],\"alphabet\":\"ab\",\"state\":[\"q0\",\"q1\",\"q2\",\"q3\"]}"),
+  ("multiple-of-3", "DFA", "{\"final\":[\"q0\",\"q3\"],\"initial\":\"q0\",\"transition\":[[\"q0\",\"0\",\"q0\"],[\"q0\",\"1\",\"q1\"],[\"q1\",\"1\",\"q0\"],[\"q1\",\"0\",\"q2\"],[\"q2\",\"0\",\"q1\"],[\"q2\",\"1\",\"q2\"]],\"alphabet\":\"01\",\"state\":[\"q0\",\"q1\",\"q2\"]}")
+  ]
 
 main = do
   ref <- newIORef exNA1
