@@ -1,5 +1,5 @@
 {-# LANGUAGE GADTs, DataKinds, TypeOperators, UndecidableInstances #-}
-{-# LANGUAGE ScopedTypeVariables, KindSignatures #-}
+{-# LANGUAGE ScopedTypeVariables, KindSignatures, ImpredicativeTypes, PartialTypeSignatures #-}
 import Haste
 import Haste.DOM
 import Haste.Events
@@ -29,7 +29,16 @@ initial :: Lens' (Automaton qs as f q) q; initial = lenses (Name :: Name "initia
 final :: Lens' (Automaton qs as f q) qs; final = lenses (Name :: Name "final")
 
 type St = String
-type NA = Automaton [St] [Char] [(St, Char, St)] St
+type NA s = Automaton [s] [Char] [(s, Char, s)] s
+
+convertNA :: (s -> s') -> NA s -> NA s'
+convertNA (f :: s -> s') at =
+  sinsert (Tag $ fmap f (at^.state) :: "state" :< [s']) $
+  sinsert (Tag $ at^.alphabet :: "alphabet" :< String) $
+  sinsert (Tag $ fmap (\(a,b,c) -> (f a,b,f c)) (at^.transition) :: "transition" :< [(s',Char,s')]) $
+  sinsert (Tag $ f (at^.initial) :: "initial" :< s') $
+  sinsert (Tag $ fmap f (at^.final) :: "final" :< [s']) $
+  Union HNil
 
 instance (Serialize a, Serialize b, Serialize c) => Serialize (a,b,c) where
   toJSON (a,b,c) = Arr [toJSON a, toJSON b, toJSON c]
@@ -64,7 +73,32 @@ instance (UnionToJSON xs, All Serialize xs) => Serialize (Union xs) where
   toJSON = unionToJSON
   parseJSON = jsonToUnion
 
-buildNA :: NA -> String
+deltaMap :: (Eq s) => NA s -> [s] -> Char -> [s]
+deltaMap at qs c = nub [q' | (q,c',q') <- (at^.transition), q `elem` qs, c == c']
+
+isDFA :: (Eq s) => NA s -> Bool
+isDFA at = all (\(q,c) -> length (deltaMap at [q] c) == 1) $ zip (at ^. state) (at ^. alphabet)
+
+convertNFAtoDFA :: (Eq s, Ord s) => NA s -> NA [s]
+convertNFAtoDFA (at :: NA s) =
+  sinsert (Tag qs :: "state" :< [[s]]) $
+  sinsert (Tag (at^.alphabet) :: "alphabet" :< String) $
+  sinsert (Tag d :: "transition" :< [([s], Char, [s])]) $
+  sinsert (Tag [at^.initial] :: "initial" :< [s]) $
+  sinsert (Tag f :: "final" :< [[s]]) $
+  Union HNil
+  where
+    (qs,d,f) = go [[at^.initial]] [] [] []
+
+    go [] qs d f = (qs,d,f)
+    go (q':ws) qs d f = go w' qs' d' f'
+      where
+        qs' = q' : qs
+        f' = if q' `intersect` (at ^. final) /= [] then (q':f) else f
+        w' = nub $ [deltaMap at q' c | c <- at^.alphabet, deltaMap at q' c `notElem` qs'] ++ ws
+        d' = nub $ [(q',c,deltaMap at q' c) | c <- at^.alphabet] ++ d
+
+buildNA :: (Eq s, Show s) => NA s -> String
 buildNA at = _data where
   _data = "{ nodes: " ++ _nodes ++ ", edges: " ++ _edges ++ " }"
   _nodes = (\x -> "[" ++ x ++ "]") $ intercalate "," $ fmap _node (at ^. state)
@@ -83,24 +117,24 @@ buildTbodyHTML ss = _tbody where
   _tr s = "<tr>" ++ (concat $ fmap _td s) ++ "</tr>"
   _td x = "<td>" ++ x ++ "</td>"
 
-stateNAHTML :: NA -> String
-stateNAHTML at = buildTbodyHTML $ (++ [[_input, _buttonAdd]]) $ fmap (\q -> [q, _checkbox q, _buttonDelete q]) (at ^. state) where
-  _checkbox q = "<input type=\"checkbox\" id=\"state-final-" ++ q ++ "\"" ++ checked q ++ ">"
-  _buttonDelete q = "<button type=\"submit\" class=\"btn btn-xs btn-default\" id=\"delete-state-" ++ q ++ "\">削除</button>"
+stateNAHTML :: NA St -> String
+stateNAHTML at = buildTbodyHTML $ (++ [[_input, _buttonAdd]]) $ fmap (\(i,q) -> [q, _checkbox i q, _buttonDelete i]) $ zip [1..] (at ^. state) where
+  _checkbox i q = "<input type=\"checkbox\" id=\"state-final-" ++ show i ++ "\"" ++ checked q ++ ">"
+  _buttonDelete i = "<button type=\"submit\" class=\"btn btn-xs btn-default\" id=\"delete-state-" ++ show i ++ "\">削除</button>"
   _buttonAdd = "<button type=\"submit\" class=\"btn btn-xs btn-primary\" id=\"add-state\">追加</button>"
   _input = "<input type=\"text\" class=\"form-control input-sm\" id=\"new-state\">"
 
   checked q = if q `elem` (at ^. final) then " checked=\"checked\"" else ""
 
-alphabetNAHTML :: NA -> String
+alphabetNAHTML :: NA St -> String
 alphabetNAHTML at = buildTbodyHTML $ (++ [[_text, _buttonAdd]]) $ fmap (\q -> [[q], _buttonDelete [q]]) (at ^. alphabet) where
   _buttonDelete q = "<button type=\"submit\" class=\"btn btn-xs btn-default\" id=\"delete-alphabet-" ++ q ++ "\">削除</button>"
   _text = "<input type=\"text\" class=\"form-control input-sm\" id=\"new-alphabet\">"
   _buttonAdd = "<button type=\"submit\" class=\"btn btn-xs btn-primary\" id=\"add-alphabet\">追加</button>"
 
-transitionNAHTML :: NA -> String
-transitionNAHTML at = buildTbodyHTML $ (++ [_trLast]) $ fmap (\(q,a,q') -> [q,[a],q',_buttonDelete (q,a,q')]) (at ^. transition) where
-  _buttonDelete (q,a,q') = "<button type=\"submit\" class=\"btn btn-xs btn-default\" id=\"delete-transition-" ++ q ++ "-" ++ [a] ++ "-" ++ q' ++ "\">削除</button>"
+transitionNAHTML :: NA St -> String
+transitionNAHTML at = buildTbodyHTML $ (++ [_trLast]) $ fmap (\(i,(q,a,q')) -> [q,[a],q',_buttonDelete i]) $ zip [1..] (at ^. transition) where
+  _buttonDelete i = "<button type=\"submit\" class=\"btn btn-xs btn-default\" id=\"delete-transition-" ++ show i ++ "\">削除</button>"
   _trLast = [_stateSelect "select-source", _alphabetSelect, _stateSelect "select-target", _buttonAdd]
   _stateSelect k = "<select class=\"form-control input-sm\" id=\"" ++ k ++ "\">" ++ _optionState ++ "</select>"
   _optionState = concat $ fmap (\x -> "<option>" ++ x ++ "</option>") (at ^. state)
@@ -114,9 +148,12 @@ wordListHTML ss = buildTbodyHTML $ fmap (\(s,b) -> [s, resultSpan b]) ss where
   resultSpan False = "<span class=\"label label-danger\">X</span>"
 
 exampleTableHTML :: [(String, String)] -> String
-exampleTableHTML ss = buildTbodyHTML $ fmap (\(x,y) -> [x,y,"<button type=\"submit\" class=\"btn btn-xs btn-default\" id=\"load-" ++ x ++ "\">Load</button>"]) ss
+exampleTableHTML ss = buildTbodyHTML $ fmap (\(i,(x,y)) -> [x,y,"<button type=\"submit\" class=\"btn btn-xs btn-default\" id=\"load-" ++ show i ++ "\">Load</button>"]) $ zip [1..] ss
 
-drawNA :: IORef NA -> IO ()
+conversionTableHTML :: [String] -> String
+conversionTableHTML ss = buildTbodyHTML $ fmap (\(i,x) -> [x,"<button type=\"submit\" class=\"btn btn-xs btn-default\" id=\"convert-" ++ show i ++ "\">Go</button>"]) $ zip [1..] ss
+
+drawNA :: (Eq s, Show s) => IORef (NA s) -> IO ()
 drawNA ref = do
   at <- readIORef ref
 
@@ -147,17 +184,17 @@ drawNA ref = do
 \  "
   return ()
 
-runOnNA :: NA -> [Char] -> [St]
+runOnNA :: (Eq s) => NA s -> [Char] -> [s]
 runOnNA at cs = go [at ^. initial] cs where
   go qs [] = qs
   go qs (c:cs) =
     let qs' = [q' | q' <- at ^. state, q <- qs, (q,c,q') `elem` (at ^. transition)]
     in go qs' cs
 
-accepted :: NA -> [Char] -> Bool
+accepted :: (Eq s) => NA s -> [Char] -> Bool
 accepted at cs = runOnNA at cs `intersect` (at ^. final) /= []
 
-exNA1 :: NA
+exNA1 :: NA St
 exNA1 =
   sinsert (Tag ["q0", "q1", "q2", "q3"] :: "state" :< [St]) $
   sinsert (Tag "ab" :: "alphabet" :< String) $
@@ -179,13 +216,13 @@ mainloop ref = do
     setProp e "innerHTML" $ stateNAHTML at
 
   at <- readIORef ref
-  forM_ (at ^. state) $ \q -> do
-    withElem ("delete-state-" ++ q) $ \e -> do
+  forM_ (zip [1..] (at ^. state)) $ \(i,q) -> do
+    withElem ("delete-state-" ++ show i) $ \e -> do
       onEvent e Click $ \_ -> do
         modifyIORef ref $ (state %~ delete q)
         mainloop ref
 
-    withElem ("state-final-" ++ q) $ \e -> do
+    withElem ("state-final-" ++ show i) $ \e -> do
       onEvent e Click $ \_ -> do
         t <- getProp e "checked"
         case t of
@@ -224,8 +261,8 @@ mainloop ref = do
     setProp e "innerHTML" $ transitionNAHTML at
 
   at <- readIORef ref
-  forM_ (at ^. transition) $ \(p@(q,a,q')) -> do
-    withElem ("delete-transition-" ++ q ++ "-" ++ [a] ++ "-" ++ q') $ \e -> do
+  forM_ (zip [1..] (at ^. transition)) $ \(i,p) -> do
+    withElem ("delete-transition-" ++ show i) $ \e -> do
       onEvent e Click $ \_ -> do
         modifyIORef ref $ (transition %~ delete p)
         mainloop ref
@@ -246,7 +283,6 @@ mainloop ref = do
   withElem "export-button" $ \e -> do
     onEvent e Click $ \_ -> do
       at <- readIORef ref
-
       Just t <- elemById "export-text"
       setProp t "innerText" $ fromJSStr $ encodeJSON $ toJSON at
 
@@ -279,19 +315,38 @@ mainloop ref = do
     at <- readIORef ref
     setProp e "innerHTML" $ exampleTableHTML $ fmap (\(x,y,_) -> (x,y)) exampleTable
 
-    forM_ exampleTable $ \(k,_,json) -> do
-      withElem ("load-" ++ k) $ \t -> do
+    forM_ (zip [1..] exampleTable) $ \(i,(k,_,json)) -> do
+      withElem ("load-" ++ show i) $ \t -> do
         onEvent t Click $ \_ -> do
           let Right auto = fromJSON =<< decodeJSON (toJSString json)
           writeIORef ref auto
           mainloop ref
 
+  withElem "conversion-table-tbody" $ \e -> do
+    at <- readIORef ref
+    setProp e "innerHTML" $ conversionTableHTML $ fmap (\(x,_) -> x) conversionTable
+
+    forM_ (zip [1..] conversionTable) $ \(i,(k,f)) -> do
+      withElem ("convert-" ++ show i) $ \t -> do
+        onEvent t Click $ \_ -> do
+          modifyIORef ref $ convertNA showStrList . f
+          mainloop ref
+
   return ()
+
+showStrList :: [String] -> String
+showStrList xs = "[" ++ intercalate "," xs ++ "]"
 
 exampleTable :: [(String,String,String)]
 exampleTable = [
   ("exmple1", "NFA", "{\"final\":[\"q3\"],\"initial\":\"q0\",\"transition\":[[\"q0\",\"a\",\"q1\"],[\"q0\",\"b\",\"q2\"],[\"q1\",\"a\",\"q3\"],[\"q2\",\"a\",\"q2\"],[\"q2\",\"b\",\"q3\"],[\"q3\",\"b\",\"q3\"]],\"alphabet\":\"ab\",\"state\":[\"q0\",\"q1\",\"q2\",\"q3\"]}"),
+  ("exmple2", "NFA", "{\"final\":[\"q3\"],\"initial\":\"q0\",\"transition\":[[\"q0\",\"a\",\"q0\"],[\"q0\",\"b\",\"q0\"],[\"q0\",\"b\",\"q1\"],[\"q1\",\"a\",\"q2\"],[\"q2\",\"a\",\"q3\"],[\"q2\",\"b\",\"q3\"]],\"alphabet\":\"ab\",\"state\":[\"q0\",\"q1\",\"q2\",\"q3\"]}"),
   ("multiple-of-3", "DFA", "{\"final\":[\"q0\",\"q3\"],\"initial\":\"q0\",\"transition\":[[\"q0\",\"0\",\"q0\"],[\"q0\",\"1\",\"q1\"],[\"q1\",\"1\",\"q0\"],[\"q1\",\"0\",\"q2\"],[\"q2\",\"0\",\"q1\"],[\"q2\",\"1\",\"q2\"]],\"alphabet\":\"01\",\"state\":[\"q0\",\"q1\",\"q2\"]}")
+  ]
+
+conversionTable :: [(String,(Eq s, Ord s) => NA s -> NA [s])]
+conversionTable = [
+  ("NFAtoDFA", convertNFAtoDFA)
   ]
 
 main = do
