@@ -194,20 +194,6 @@ runOnNA at cs = go [at ^. initial] cs where
 accepted :: (Eq s) => NA s -> [Char] -> Bool
 accepted at cs = runOnNA at cs `intersect` (at ^. final) /= []
 
-exNA1 :: NA St
-exNA1 =
-  sinsert (Tag ["q0", "q1", "q2", "q3"] :: "state" :< [St]) $
-  sinsert (Tag "ab" :: "alphabet" :< String) $
-  sinsert (Tag delta :: "transition" :< [(St, Char, St)]) $
-  sinsert (Tag "q0" :: "initial" :< St) $
-  sinsert (Tag ["q3"] :: "final" :< [St]) $
-  Union HNil
-
-  where
-    delta = [
-      ("q0",'a',"q1"), ("q0",'b',"q2"), ("q1",'a',"q3"),
-      ("q2",'a',"q2"), ("q2",'b',"q3"), ("q3",'b',"q3")]
-
 mainloop ref = do
   drawNA ref
 
@@ -341,7 +327,8 @@ exampleTable :: [(String,String,String)]
 exampleTable = [
   ("exmple1", "NFA", "{\"final\":[\"q3\"],\"initial\":\"q0\",\"transition\":[[\"q0\",\"a\",\"q1\"],[\"q0\",\"b\",\"q2\"],[\"q1\",\"a\",\"q3\"],[\"q2\",\"a\",\"q2\"],[\"q2\",\"b\",\"q3\"],[\"q3\",\"b\",\"q3\"]],\"alphabet\":\"ab\",\"state\":[\"q0\",\"q1\",\"q2\",\"q3\"]}"),
   ("exmple2", "NFA", "{\"final\":[\"q3\"],\"initial\":\"q0\",\"transition\":[[\"q0\",\"a\",\"q0\"],[\"q0\",\"b\",\"q0\"],[\"q0\",\"b\",\"q1\"],[\"q1\",\"a\",\"q2\"],[\"q2\",\"a\",\"q3\"],[\"q2\",\"b\",\"q3\"]],\"alphabet\":\"ab\",\"state\":[\"q0\",\"q1\",\"q2\",\"q3\"]}"),
-  ("multiple-of-3", "DFA", "{\"final\":[\"q0\",\"q3\"],\"initial\":\"q0\",\"transition\":[[\"q0\",\"0\",\"q0\"],[\"q0\",\"1\",\"q1\"],[\"q1\",\"1\",\"q0\"],[\"q1\",\"0\",\"q2\"],[\"q2\",\"0\",\"q1\"],[\"q2\",\"1\",\"q2\"]],\"alphabet\":\"01\",\"state\":[\"q0\",\"q1\",\"q2\"]}")
+  ("worst NFAtoDFA efficiency", "NFA", "{\"final\":[\"q3\"],\"initial\":\"q0\",\"transition\":[[\"q0\",\"a\",\"q0\"],[\"q0\",\"b\",\"q0\"],[\"q0\",\"a\",\"q1\"],[\"q1\",\"a\",\"q2\"],[\"q1\",\"b\",\"q2\"],[\"q2\",\"a\",\"q3\"],[\"q2\",\"b\",\"q3\"]],\"alphabet\":\"ab\",\"state\":[\"q0\",\"q1\",\"q2\",\"q3\"]}"),
+  ("multiple of 3", "DFA", "{\"final\":[\"q0\",\"q3\"],\"initial\":\"q0\",\"transition\":[[\"q0\",\"0\",\"q0\"],[\"q0\",\"1\",\"q1\"],[\"q1\",\"1\",\"q0\"],[\"q1\",\"0\",\"q2\"],[\"q2\",\"0\",\"q1\"],[\"q2\",\"1\",\"q2\"]],\"alphabet\":\"01\",\"state\":[\"q0\",\"q1\",\"q2\"]}")
   ]
 
 conversionTable :: [(String,(Eq s, Ord s) => NA s -> NA [s])]
@@ -350,5 +337,6 @@ conversionTable = [
   ]
 
 main = do
-  ref <- newIORef exNA1
+  let Right auto = fromJSON =<< decodeJSON (toJSString $ (\(_,_,c) -> c) $ exampleTable !! 0)
+  ref <- newIORef auto
   mainloop ref
