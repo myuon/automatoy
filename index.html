@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset='utf-8'>
+  <meta content='width=device-width,initial-scale=1.0' name='viewport'>
+  <title>Automatoy</title>
+  <link rel="stylesheet" href="css/bootstrap.min.css">
+  <link rel="stylesheet" href="css/custom.css">
+</head>
+
+<body>
+
+<nav class="navbar navbar-default">
+  <div class="container-fluid">
+    <div class="navbar-header">
+      <a class="navbar-brand" href="#">Automatoy</a>
+    </div>
+
+    <div class="collapse navbar-collapse" id="bs-example-navbar-collapse-1">
+      <ul class="nav navbar-nav navbar-right">
+        <li><a href="" data-toggle="modal" data-target="#import">Import</a></li>
+        <li><a href="" data-toggle="modal" data-target="#export">Export</a></li>
+      </ul>
+    </div>
+  </div>
+</nav>
+
+<div class="modal fade" id="export" tabindex="-1" role="dialog">
+  <div class="modal-dialog" role="document">
+    <div class="modal-content">
+      <div class="modal-header">
+        <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+        <h4 class="modal-title">Export</h4>
+      </div>
+      <div class="modal-body">
+        <textarea class="form-control" rows="3" id="export-text"></textarea>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-primary" id="export-button">Export</button>
+        <button type="button" class="btn btn-default" data-dismiss="modal">Cancel</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="import" tabindex="-1" role="dialog">
+  <div class="modal-dialog" role="document">
+    <div class="modal-content">
+      <div class="modal-header">
+        <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+        <h4 class="modal-title">Import</h4>
+      </div>
+      <div class="modal-body">
+        <textarea class="form-control" rows="3" id="import-text"></textarea>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-primary" id="import-button">Import</button>
+        <button type="button" class="btn btn-default" data-dismiss="modal">Cancel</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="container">
+  <div class="row">
+    <div class="col-sm-5">
+      <ul class="nav nav-pills" role="tablist">
+        <li class="active"><a href="#def" data-toggle="tab">Def</a></li>
+        <li><a href="#check" data-toggle="tab">Check</a></li>
+        <li><a href="#example" data-toggle="tab">Conversion</a></li>
+      </ul>
+
+      <hr>
+
+      <div class="tab-content">
+        <div role="tabpanel" class="tab-pane fade in active" id="def">
+          <div class="states">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th>state id</th>
+                  <th>final?</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="state-table-tbody">
+              </tbody>
+            </table>
+          </div>
+
+          <div class="alphabet">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th>alphabet</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="alphabet-table-tbody">
+              </tbody>
+            </table>
+          </div>
+
+          <div class="transition">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th>source</th>
+                  <th>label</th>
+                  <th>target</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="transition-table-tbody">
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div role="tabpanel" class="tab-pane fade" id="check">
+          <form class="form-inline">
+            <div class="form-group">
+              <input type="text" class="form-control input-sm" id="accept-check-text">
+            </div>
+            <button type="submit" class="btn btn-sm btn-default" id="accept-check-button">Check</button>
+            <span id="accept-check-result"></span>
+          </form>
+
+          <hr>
+
+          <table class="table">
+            <thead>
+              <tr>
+                <th>word</th>
+                <th>OK?</th>
+              </tr>
+            </thead>
+            <tbody id="word-table-tbody">
+            </tbody>
+          </table>
+        </div>
+
+        <div role="tabpanel" class="tab-pane fade" id="example">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>name</th>
+                <th>type</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="example-table-tbody">
+            </tbody>
+          </table>
+
+          <table class="table">
+            <thead>
+              <tr>
+                <th>algorithm</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="conversion-table-tbody">
+              <tr>
+                <td>NFA to DFA</td>
+                <td><button></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-sm-7">
+      <div id="cy"></div>
+    </div>
+  </div>
+</div>
+
+<script src="js/cytoscape.min.js"></script>
+<script src="js/jquery.js"></script>
+<script src="js/bootstrap.min.js"></script>
+<script src="js/main.js"></script>
+
+</body>
+</html>
