@@ -206,6 +206,8 @@ mainloop ref = do
     withElem ("delete-state-" ++ show i) $ \e -> do
       onEvent e Click $ \_ -> do
         modifyIORef ref $ (state %~ delete q)
+        modifyIORef ref $ (transition %~ filter (\(q1,_,q2) -> q /= q1 && q /= q2))
+
         mainloop ref
 
     withElem ("state-final-" ++ show i) $ \e -> do
@@ -227,12 +229,12 @@ mainloop ref = do
     at <- readIORef ref
     setProp e "innerHTML" $ alphabetNAHTML at
 
-  -- alphabetを削除するときにそれを含むtransitionも削除するようにする？
   at <- readIORef ref
   forM_ (at ^. alphabet) $ \c -> do
     withElem ("delete-alphabet-" ++ [c]) $ \e -> do
       onEvent e Click $ \_ -> do
         modifyIORef ref $ (alphabet %~ delete c)
+        modifyIORef ref $ (transition %~ filter (\(_,c1,_) -> c /= c1))
         mainloop ref
 
   withElem "add-alphabet" $ \e -> do
@@ -294,8 +296,8 @@ mainloop ref = do
 
   withElem "word-table-tbody" $ \e -> do
     at <- readIORef ref
-    let ps = [(w,accepted at w) | n <- [5], w <- replicateM n (at ^. alphabet)]
-    setProp e "innerHTML" $ wordListHTML ps
+    let ps = [(w,accepted at w) | n <- [1..5], w <- replicateM n (at ^. alphabet)]
+    setProp e "innerHTML" $ wordListHTML $ take 50 ps
 
   withElem "example-table-tbody" $ \e -> do
     at <- readIORef ref
