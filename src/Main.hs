@@ -22,9 +22,14 @@ type Automaton qs as f q = UnionT '[
   "final" :< qs
   ]
 
+state :: Lens' (Automaton qs as f q) qs; state = lenses (Name :: Name "state")
+alphabet :: Lens' (Automaton qs as f q) as; alphabet = lenses (Name :: Name "alphabet")
+transition :: Lens' (Automaton qs as f q) f; transition = lenses (Name :: Name "transition")
+initial :: Lens' (Automaton qs as f q) q; initial = lenses (Name :: Name "initial")
+final :: Lens' (Automaton qs as f q) qs; final = lenses (Name :: Name "final")
+
 type St = String
-type DA = Automaton [St] [Char] [(St, Char, St)] St
-type NA = Automaton [St] [String] [(St, String, [St])] St
+type NA = Automaton [St] [Char] [(St, Char, St)] St
 
 instance (Serialize a, Serialize b, Serialize c) => Serialize (a,b,c) where
   toJSON (a,b,c) = Arr [toJSON a, toJSON b, toJSON c]
@@ -59,93 +64,60 @@ instance (UnionToJSON xs, All Serialize xs) => Serialize (Union xs) where
   toJSON = unionToJSON
   parseJSON = jsonToUnion
 
-deltaDA :: DA -> [(St,Char,St)]
-deltaDA at = go [q0] [q0] [] where
-  go ws qs acc = let
-      ds' = [(q,a,q') | a <- alphas, q <- ws, q' <- states, (q,a,q') `elem` delta]
-      ws' = nub $ [q | q <- fmap (\(_,_,q') -> q') ds', q `notElem` qs]
-    in
-      if ds' == [] then acc else go ws' (qs ++ ws') (acc ++ ds')
-
-  q0 = at ^. lenses (Name :: Name "initial")
-  states = at ^. lenses (Name :: Name "state")
-  alphas = at ^. lenses (Name :: Name "alphabet")
-  delta = at ^. lenses (Name :: Name "transition")
-
-buildDA :: DA -> String
-buildDA at = _data where
+buildNA :: NA -> String
+buildNA at = _data where
   _data = "{ nodes: " ++ _nodes ++ ", edges: " ++ _edges ++ " }"
-  _nodes = (\x -> "[" ++ x ++ "]") $ intercalate "," $ fmap _node (at ^. lenses (Name :: Name "state"))
-  _edges = (\x -> "[" ++ x ++ "]") $ intercalate "," $ fmap _edge (deltaDA at)
+  _nodes = (\x -> "[" ++ x ++ "]") $ intercalate "," $ fmap _node (at ^. state)
+  _edges = (\x -> "[" ++ x ++ "]") $ intercalate "," $ fmap _edge (at ^. transition)
   _node x = "{data: {label: " ++ show x ++ ", id: " ++ show x ++ ", color: " ++ _color x ++ "}}"
   _edge (q,a,q') = "{data: {source: " ++ show q ++ ", target: " ++ show q' ++ ", label: " ++ show a ++ "}}"
-  _final x = let b = x `elem` (at ^. lenses (Name :: Name "final")) in
-    if b then "true" else "false"
+  _final x = let b = x `elem` (at ^. final) in if b then "true" else "false"
   _color x
-    | x `elem` (at ^. lenses (Name :: Name "final")) = "'#494'"
-    | x == (at ^. lenses (Name :: Name "initial")) = "'#c4f'"
+    | x `elem` (at ^. final) = "'#494'"
+    | x == (at ^. initial) = "'#c4f'"
     | otherwise = "'#f94'"
 
-stateDAHTML :: DA -> String
-stateDAHTML at = _tbody where
-  _tbody = (++ _trLast) $ concat $ fmap _tr (at ^. lenses (Name :: Name "state"))
-  _tr q = "<tr>" ++ _td q ++ _td (_tdCheckbox q) ++ _tdButton q ++ "</tr>"
-  _td q = "<td>" ++ q ++ "</td>"
-  _tdCheckbox q = "<input type=\"checkbox\" id=\"state-final-" ++ q ++ "\"" ++ checked q ++ ">"
-  _tdButton q = "<td><button type=\"submit\" class=\"btn btn-xs btn-default\" id=\"delete-state-" ++ q ++ "\">削除</button></td>"
-  _trLast =
-    "<tr> \
-    \  <td><input type=\"text\" class=\"form-control input-sm\" id=\"new-state\"></td> \
-    \  <td><button type=\"submit\" class=\"btn btn-xs btn-primary\" id=\"add-state\">追加</button></td> \
-    \ </tr> "
-
-  checked q = if q `elem` (at ^. lenses (Name :: Name "final"))
-    then " checked=\"checked\""
-    else ""
-
-alphabetDAHTML :: DA -> String
-alphabetDAHTML at = _tbody where
-  _tbody = (++ _trLast) $ concat $ fmap _tr (at ^. lenses (Name :: Name "alphabet"))
-  _tr q = "<tr>" ++ _tdLetter [q] ++ _tdButton [q] ++ "</tr>"
-  _tdLetter q = "<td>" ++ q ++ "</td>"
-  _tdButton q = "<td><button type=\"submit\" class=\"btn btn-xs btn-default\" id=\"delete-alphabet-" ++ q ++ "\">削除</button></td>"
-  _trLast =
-    "<tr> \
-    \  <td><input type=\"text\" class=\"form-control input-sm\" id=\"new-alphabet\"></td> \
-    \  <td><button type=\"submit\" class=\"btn btn-xs btn-primary\" id=\"add-alphabet\">追加</button></td> \
-    \ </tr> "
-
-transitionDAHTML :: DA -> String
-transitionDAHTML at = _tbody where
-  _tbody = (++ _trLast) $ concat $ fmap _tr (at ^. lenses (Name :: Name "transition"))
-  _tr (q,a,q') = "<tr>" ++ _td q ++ _td [a] ++ _td q' ++ _tdButton (q,a,q') ++ "</tr>"
+buildTbodyHTML :: [[String]] -> String
+buildTbodyHTML ss = _tbody where
+  _tbody = concat $ fmap _tr ss
+  _tr s = "<tr>" ++ (concat $ fmap _td s) ++ "</tr>"
   _td x = "<td>" ++ x ++ "</td>"
-  _tdButton (q,a,q') = "<td><button type=\"submit\" class=\"btn btn-xs btn-default\" id=\"delete-transition-" ++ q ++ "-" ++ [a] ++ "-" ++ q' ++ "\">削除</button></td>"
-  _trLast = "<tr>" ++ _td (_stateSelect "select-source") ++ _td _alphabetSelect ++ _td (_stateSelect "select-target") ++ _td _tdButtonAdd ++ "</tr>"
+
+stateNAHTML :: NA -> String
+stateNAHTML at = buildTbodyHTML $ (++ [[_input, _buttonAdd]]) $ fmap (\q -> [q, _checkbox q, _buttonDelete q]) (at ^. state) where
+  _checkbox q = "<input type=\"checkbox\" id=\"state-final-" ++ q ++ "\"" ++ checked q ++ ">"
+  _buttonDelete q = "<button type=\"submit\" class=\"btn btn-xs btn-default\" id=\"delete-state-" ++ q ++ "\">削除</button>"
+  _buttonAdd = "<button type=\"submit\" class=\"btn btn-xs btn-primary\" id=\"add-state\">追加</button>"
+  _input = "<input type=\"text\" class=\"form-control input-sm\" id=\"new-state\">"
+
+  checked q = if q `elem` (at ^. final) then " checked=\"checked\"" else ""
+
+alphabetNAHTML :: NA -> String
+alphabetNAHTML at = buildTbodyHTML $ (++ [[_text, _buttonAdd]]) $ fmap (\q -> [[q], _buttonDelete [q]]) (at ^. alphabet) where
+  _buttonDelete q = "<button type=\"submit\" class=\"btn btn-xs btn-default\" id=\"delete-alphabet-" ++ q ++ "\">削除</button>"
+  _text = "<input type=\"text\" class=\"form-control input-sm\" id=\"new-alphabet\">"
+  _buttonAdd = "<button type=\"submit\" class=\"btn btn-xs btn-primary\" id=\"add-alphabet\">追加</button>"
+
+transitionNAHTML :: NA -> String
+transitionNAHTML at = buildTbodyHTML $ (++ [_trLast]) $ fmap (\(q,a,q') -> [q,[a],q',_buttonDelete (q,a,q')]) (at ^. transition) where
+  _buttonDelete (q,a,q') = "<button type=\"submit\" class=\"btn btn-xs btn-default\" id=\"delete-transition-" ++ q ++ "-" ++ [a] ++ "-" ++ q' ++ "\">削除</button>"
+  _trLast = [_stateSelect "select-source", _alphabetSelect, _stateSelect "select-target", _buttonAdd]
   _stateSelect k = "<select class=\"form-control input-sm\" id=\"" ++ k ++ "\">" ++ _optionState ++ "</select>"
-  _optionState = concat $ fmap (\x -> "<option>" ++ x ++ "</option>") (at ^. lenses (Name :: Name "state"))
+  _optionState = concat $ fmap (\x -> "<option>" ++ x ++ "</option>") (at ^. state)
   _alphabetSelect = "<select class=\"form-control input-sm\" id=\"select-alphabet\">" ++ _optionAlphabet ++ "</select>"
-  _optionAlphabet = concat $ fmap (\x -> "<option>" ++ [x] ++ "</option>") (at ^. lenses (Name :: Name "alphabet"))
-  _tdButtonAdd = "<button type=\"submit\" class=\"btn btn-xs btn-primary\" id=\"add-transition\">追加</button>"
+  _optionAlphabet = concat $ fmap (\x -> "<option>" ++ [x] ++ "</option>") (at ^. alphabet)
+  _buttonAdd = "<button type=\"submit\" class=\"btn btn-xs btn-primary\" id=\"add-transition\">追加</button>"
 
 wordListHTML :: [(String, Bool)] -> String
-wordListHTML ss = _tbody where
-  _tbody = concat $ fmap _tr ss
-  _tr (s,t) = "<tr>" ++ _td s ++ _td (resultSpan t) ++ "</tr>"
-  _td x = "<td>" ++ x ++ "</td>"
-
+wordListHTML ss = buildTbodyHTML $ fmap (\(s,b) -> [s, resultSpan b]) ss where
   resultSpan True = "<span class=\"label label-success\">O</span>"
   resultSpan False = "<span class=\"label label-danger\">X</span>"
 
-tupleTableHTML :: [(String, String)] -> String
-tupleTableHTML ss = _tbody where
-  _tbody = concat $ fmap _tr ss
-  _tr (x,y) = "<tr>" ++ _td x ++ _td y ++ _td (_button x) ++ "</tr>"
-  _td x = "<td>" ++ x ++ "</td>"
-  _button x = "<button type=\"submit\" class=\"btn btn-xs btn-default\" id=\"load-" ++ x ++ "\">Load</button>"
+exampleTableHTML :: [(String, String)] -> String
+exampleTableHTML ss = buildTbodyHTML $ fmap (\(x,y) -> [x,y,"<button type=\"submit\" class=\"btn btn-xs btn-default\" id=\"load-" ++ x ++ "\">Load</button>"]) ss
 
-drawDA :: IORef DA -> IO ()
-drawDA ref = do
+drawNA :: IORef NA -> IO ()
+drawNA ref = do
   at <- readIORef ref
 
   eval $ toJSString $ " \
@@ -165,7 +137,7 @@ drawDA ref = do
 \     'width': 3, \
 \     'content': 'data(label)' \
 \   }), \
-\ elements: " ++ buildDA at ++ ", \
+\ elements: " ++ buildNA at ++ ", \
 \ layout: { \
 \   name: 'cose', \
 \   directed: true, \
@@ -175,16 +147,17 @@ drawDA ref = do
 \  "
   return ()
 
-runOnDA :: DA -> [Char] -> [St]
-runOnDA at cs = go [at ^. lenses (Name :: Name "initial")] cs where
+runOnNA :: NA -> [Char] -> [St]
+runOnNA at cs = go [at ^. initial] cs where
   go qs [] = qs
-  go qs (c:cs) = let qs' = [q' | q' <- at ^. lenses (Name :: Name "state"), q <- qs, (q,c,q') `elem` (at ^. lenses (Name :: Name "transition"))]
+  go qs (c:cs) =
+    let qs' = [q' | q' <- at ^. state, q <- qs, (q,c,q') `elem` (at ^. transition)]
     in go qs' cs
 
-accepted :: DA -> [Char] -> Bool
-accepted at cs = runOnDA at cs `intersect` (at ^. lenses (Name :: Name "final")) /= []
+accepted :: NA -> [Char] -> Bool
+accepted at cs = runOnNA at cs `intersect` (at ^. final) /= []
 
-exNA1 :: DA
+exNA1 :: NA
 exNA1 =
   sinsert (Tag ["q0", "q1", "q2", "q3"] :: "state" :< [St]) $
   sinsert (Tag "ab" :: "alphabet" :< String) $
@@ -195,69 +168,66 @@ exNA1 =
 
   where
     delta = [
-      ("q0",'a',"q1"), ("q0",'b',"q2"),
-      ("q1",'a',"q3"),
-      ("q2",'a',"q2"), ("q2",'b',"q3"),
-      ("q3",'b',"q3")
-      ]
+      ("q0",'a',"q1"), ("q0",'b',"q2"), ("q1",'a',"q3"),
+      ("q2",'a',"q2"), ("q2",'b',"q3"), ("q3",'b',"q3")]
 
 mainloop ref = do
-  drawDA ref
+  drawNA ref
 
   withElem "state-table-tbody" $ \e -> do
     at <- readIORef ref
-    setProp e "innerHTML" $ stateDAHTML at
+    setProp e "innerHTML" $ stateNAHTML at
 
   at <- readIORef ref
-  forM_ (at ^. lenses (Name :: Name "state")) $ \q -> do
+  forM_ (at ^. state) $ \q -> do
     withElem ("delete-state-" ++ q) $ \e -> do
       onEvent e Click $ \_ -> do
-        modifyIORef ref $ (lenses (Name :: Name "state") %~ delete q)
+        modifyIORef ref $ (state %~ delete q)
         mainloop ref
 
     withElem ("state-final-" ++ q) $ \e -> do
       onEvent e Click $ \_ -> do
         t <- getProp e "checked"
         case t of
-          "true" -> modifyIORef ref $ (lenses (Name :: Name "final") %~ (q :))
-          "false" -> modifyIORef ref $ (lenses (Name :: Name "final") %~ delete q)
+          "true" -> modifyIORef ref $ (final %~ (q :))
+          "false" -> modifyIORef ref $ (final %~ delete q)
         mainloop ref
 
   withElem "add-state" $ \e -> do
     onEvent e Click $ \_ -> do
       Just tbox <- elemById "new-state"
       Just t <- getValue tbox
-      modifyIORef ref $ (lenses (Name :: Name "state") %~ (++ [t]))
+      modifyIORef ref $ (state %~ (++ [t]))
       mainloop ref
 
   withElem "alphabet-table-tbody" $ \e -> do
     at <- readIORef ref
-    setProp e "innerHTML" $ alphabetDAHTML at
+    setProp e "innerHTML" $ alphabetNAHTML at
 
   -- alphabetを削除するときにそれを含むtransitionも削除するようにする？
   at <- readIORef ref
-  forM_ (at ^. lenses (Name :: Name "alphabet")) $ \c -> do
+  forM_ (at ^. alphabet) $ \c -> do
     withElem ("delete-alphabet-" ++ [c]) $ \e -> do
       onEvent e Click $ \_ -> do
-        modifyIORef ref $ (lenses (Name :: Name "alphabet") %~ delete c)
+        modifyIORef ref $ (alphabet %~ delete c)
         mainloop ref
 
   withElem "add-alphabet" $ \e -> do
     onEvent e Click $ \_ -> do
       Just tbox <- elemById "new-alphabet"
       Just [t] <- getValue tbox
-      modifyIORef ref $ (lenses (Name :: Name "alphabet") %~ (++ [t]))
+      modifyIORef ref $ (alphabet %~ (++ [t]))
       mainloop ref
 
   withElem "transition-table-tbody" $ \e -> do
     at <- readIORef ref
-    setProp e "innerHTML" $ transitionDAHTML at
+    setProp e "innerHTML" $ transitionNAHTML at
 
   at <- readIORef ref
-  forM_ (at ^. lenses (Name :: Name "transition")) $ \(p@(q,a,q')) -> do
+  forM_ (at ^. transition) $ \(p@(q,a,q')) -> do
     withElem ("delete-transition-" ++ q ++ "-" ++ [a] ++ "-" ++ q') $ \e -> do
       onEvent e Click $ \_ -> do
-        modifyIORef ref $ (lenses (Name :: Name "transition") %~ delete p)
+        modifyIORef ref $ (transition %~ delete p)
         mainloop ref
 
   withElem "add-transition" $ \e -> do
@@ -270,7 +240,7 @@ mainloop ref = do
 
       Just sels <- elemById "select-target"
       Just q' <- getValue sels
-      modifyIORef ref $ (lenses (Name :: Name "transition") %~ (nub . (++ [(q,a,q')])))
+      modifyIORef ref $ (transition %~ (nub . (++ [(q,a,q')])))
       mainloop ref
 
   withElem "export-button" $ \e -> do
@@ -302,12 +272,12 @@ mainloop ref = do
 
   withElem "word-table-tbody" $ \e -> do
     at <- readIORef ref
-    let ps = [(w,accepted at w) | n <- [5], w <- replicateM n (at ^. lenses (Name :: Name "alphabet"))]
+    let ps = [(w,accepted at w) | n <- [5], w <- replicateM n (at ^. alphabet)]
     setProp e "innerHTML" $ wordListHTML ps
 
   withElem "example-table-tbody" $ \e -> do
     at <- readIORef ref
-    setProp e "innerHTML" $ tupleTableHTML $ fmap (\(x,y,_) -> (x,y)) exampleTable
+    setProp e "innerHTML" $ exampleTableHTML $ fmap (\(x,y,_) -> (x,y)) exampleTable
 
     forM_ exampleTable $ \(k,_,json) -> do
       withElem ("load-" ++ k) $ \t -> do
