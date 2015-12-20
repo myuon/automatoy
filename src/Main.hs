@@ -126,6 +126,12 @@ stateNAHTML at = buildTbodyHTML $ (++ [[_input, _buttonAdd]]) $ fmap (\(i,q) -> 
 
   checked q = if q `elem` (at ^. final) then " checked=\"checked\"" else ""
 
+initialHTML :: NA St -> String
+initialHTML at = concat $ fmap _option (at ^. state) where
+  _option s
+    | s == (at ^. initial) = "<option selected=\"selected\">" ++ s ++ "</option>"
+    | otherwise = "<option>" ++ s ++ "</option>"
+
 alphabetNAHTML :: NA St -> String
 alphabetNAHTML at = buildTbodyHTML $ (++ [[_text, _buttonAdd]]) $ fmap (\q -> [[q], _buttonDelete [q]]) (at ^. alphabet) where
   _buttonDelete q = "<button type=\"submit\" class=\"btn btn-xs btn-default\" id=\"delete-alphabet-" ++ q ++ "\">削除</button>"
@@ -196,6 +202,18 @@ accepted at cs = runOnNA at cs `intersect` (at ^. final) /= []
 
 mainloop ref = do
   drawNA ref
+
+  withElem "initial-state-select" $ \e -> do
+    at <- readIORef ref
+    setProp e "innerHTML" $ initialHTML at
+
+  withElem "change-initial" $ \e -> do
+    onEvent e Click $ \_ -> do
+      Just sel <- elemById "initial-state-select"
+      Just q0 <- getValue sel
+
+      modifyIORef ref $ (initial .~ q0)
+      mainloop ref
 
   withElem "state-table-tbody" $ \e -> do
     at <- readIORef ref
