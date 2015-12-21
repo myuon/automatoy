@@ -62,19 +62,42 @@
 </div>
 
 <div class="container">
+  <ul class="nav nav-pills" role="tablist">
+    <li class="active"><a href="#automaton" data-toggle="tab">Automaton</a></li>
+    <li><a href="#check" data-toggle="tab">Check</a></li>
+    <li><a href="#example" data-toggle="tab">Conversion</a></li>
+  </ul>
+
+  <hr>
+
+  <div id="alert-area">
+  </div>
+
   <div class="row">
     <div class="col-sm-5">
-      <ul class="nav nav-pills" role="tablist">
-        <li class="active"><a href="#def" data-toggle="tab">Def</a></li>
-        <li><a href="#check" data-toggle="tab">Check</a></li>
-        <li><a href="#example" data-toggle="tab">Conversion</a></li>
-      </ul>
-
-      <hr>
-
       <div class="tab-content">
-        <div role="tabpanel" class="tab-pane fade in active" id="def">
+        <div role="tabpanel" class="tab-pane fade in active" id="automaton">
           <div class="states">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th>initial</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>
+                    <select class="form-control input-sm" id="initial-state-select">
+                    </select>
+                  </td>
+                  <td>
+                    <button type="button" class="btn btn-xs btn-default" id="change-initial">Go</button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+
             <table class="table">
               <thead>
                 <tr>
@@ -122,7 +145,7 @@
             <div class="form-group">
               <input type="text" class="form-control input-sm" id="accept-check-text">
             </div>
-            <button type="submit" class="btn btn-sm btn-default" id="accept-check-button">Check</button>
+            <button type="button" class="btn btn-sm btn-default" id="accept-check-button">Check</button>
             <span id="accept-check-result"></span>
           </form>
 
@@ -161,19 +184,14 @@
               </tr>
             </thead>
             <tbody id="conversion-table-tbody">
-              <tr>
-                <td>NFA to DFA</td>
-                <td><button></td>
-              </tr>
             </tbody>
           </table>
         </div>
-      </div>
     </div>
+  </div>
 
-    <div class="col-sm-7">
-      <div id="cy"></div>
-    </div>
+  <div class="col-sm-7">
+    <div id="cy"></div>
   </div>
 </div>
 
