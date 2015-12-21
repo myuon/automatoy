@@ -1,5 +1,5 @@
 {-# LANGUAGE GADTs, DataKinds, TypeOperators, UndecidableInstances #-}
-{-# LANGUAGE ScopedTypeVariables, KindSignatures, ImpredicativeTypes, PartialTypeSignatures #-}
+{-# LANGUAGE ScopedTypeVariables, KindSignatures, ImpredicativeTypes, FlexibleInstances #-}
 import Haste
 import Haste.DOM
 import Haste.Events
@@ -13,6 +13,7 @@ import Data.Monoid (Monoid(..), (<>))
 import Data.IORef
 import Control.Monad
 import GHC.TypeLits
+import Debug.Trace
 
 type Automaton qs as f q = UnionT '[
   "state" :< qs,
@@ -97,6 +98,103 @@ convertNFAtoDFA (at :: NA s) =
         f' = if q' `intersect` (at ^. final) /= [] then (q':f) else f
         w' = nub $ [deltaMap at q' c | c <- at^.alphabet, deltaMap at q' c `notElem` qs'] ++ ws
         d' = nub $ [(q',c,deltaMap at q' c) | c <- at^.alphabet] ++ d
+
+data RegExp c = Empty | Epsilon | Letter c | (:.) (RegExp c) (RegExp c) | (:+) (RegExp c) (RegExp c) | (:^*) (RegExp c) deriving (Eq)
+type NAreg s = Automaton [s] [Char] [(s, RegExp Char, s)] s
+
+normalize :: (Eq c) => RegExp c -> RegExp c
+normalize r = go r r where
+  go (Empty :. r) _ = Empty
+  go (r :. Empty) _ = Empty
+  go (Empty :+ r) _ = Empty
+  go (r :+ Empty) _ = Empty
+  go ((:^*) Empty) _ = Epsilon
+  go (r :. Epsilon) _ = r
+  go (Epsilon :. r) _ = r
+  go (r1 :. r2) k = let r' = normalize r1 :. normalize r2 in
+    if r' == k then r' else normalize r'
+  go (r1 :+ r2) k = let r' = normalize r1 :+ normalize r2 in
+    if r' == k then r' else normalize r'
+  go r _ = r
+
+instance Show (RegExp Char) where
+  show Empty = "∅"
+  show Epsilon = "ε"
+  show (Letter c) = [c]
+  show (Letter c1 :. Letter c2) = show (Letter c1) ++ show (Letter c2)
+  show (Letter c1 :. (r21 :. r22)) = show (Letter c1) ++ show (r21 :. r22)
+  show (Letter c1 :. r2) = show (Letter c1) ++ "(" ++ show r2 ++ ")"
+  show ((r11 :. r12) :. Letter c2) = show (r11 :. r12) ++ show (Letter c2)
+  show (r1 :. Letter c2) = "(" ++ show r1 ++ ")" ++ show (Letter c2)
+  show ((r11 :. r12) :. (r21 :. r22)) = show (r11 :. r12) ++ show (r21 :. r22)
+  show (r1 :. (r21 :. r22)) = "(" ++ show r1 ++ ")" ++ show (r21 :. r22)
+  show ((r11 :. r12) :. r2) = show (r11 :. r12) ++ "(" ++ show r2 ++ ")"
+  show (r1 :. r2) = "(" ++ show r1 ++ ")(" ++ show r2 ++ ")"
+  show (r1 :+ r2) = show r1 ++ "+" ++ show r2
+  show ((:^*) (Letter c)) = show (Letter c) ++ "*"
+  show ((:^*) r) = "(" ++ show r ++ ")*"
+
+-- instance {-# OVERLAPPABLE #-} Show c => Show (RegExp c) where
+--   show Empty = "∅"
+--   show Epsilon = "ε"
+--   show (Letter c) = show c
+--   show (Letter c1 :. Letter c2) = "(" ++ show c1 ++ show c2 ++ ")"
+--   show (Letter c1 :. r2) = "(" ++ show c1 ++ "(" ++ show r2 ++ "))"
+--   show (r1 :. Letter c2) = "((" ++ show r1 ++ ")" ++ show c2 ++ ")"
+--   show (r1 :. r2) = "(" ++ show r1 ++ ")(" ++ show r2 ++ ")"
+--   show (r1 :+ r2) = "(" ++ show r1 ++ "+" ++ show r2 ++ ")"
+--   show ((:^*) r) = "(" ++ show r ++ "*)"
+
+convertNFAtoRE :: NA St -> RegExp Char
+convertNFAtoRE at = let [(_,b,_)] = (^. transition) $ recurOnState uniqFinal in normalize b where
+  hasLoop s = ([] /=) $ filter (\(a,_,c) -> a == s && c == s) (at^.transition)
+
+  uniqFinal :: NAreg St
+  uniqFinal =
+    sinsert (Tag ("__qf" : at^.state) :: "state" :< [St]) $
+    sinsert (Tag (at^.alphabet) :: "alphabet" :< String) $
+    sinsert (Tag (fmap (\x -> (x,Epsilon,"__qf")) (at^.final) ++ fmap (\(a,b,c) -> (a,Letter b,c)) (at^.transition)) :: "transition" :< [(St, RegExp Char, St)]) $
+    sinsert (Tag (at^.initial) :: "initial" :< St) $
+    sinsert (Tag ["__qf"] :: "final" :< [St]) $
+    Union HNil
+
+  unparallel :: St -> NAreg St -> NAreg St
+  unparallel s at = at & transition .~ ((notNow ++) $ concat $ fmap (\s' -> go s s') (at^.state)) where
+    getParallel s s' = filter (\(a,_,c) -> a == s && c == s') (at^.transition)
+    notNow = filter (\(a,_,_) -> a /= s) (at^.transition)
+    go s s'
+      | length (getParallel s s') <= 1 = getParallel s s'
+      | otherwise = [foldl1 (\(a,b,c) (_,b',_) -> (a,b :+ b',c)) $ getParallel s s']
+
+  unparallelExhly :: NAreg St -> NAreg St
+  unparallelExhly at = foldl (\at' s -> unparallel s at') at (at^.state)
+
+  shortcut :: St -> NAreg St -> NAreg St
+  shortcut s at = at & transition .~ ((notNow ++) $ [go ri si | ri <- endAt s, si <- startAt s]) where
+    endAt s = filter (\(a,_,c) -> a /= s && c == s) (at^.transition)
+    startAt s = filter (\(a,_,c) -> a == s && c /= s) (at^.transition)
+    notNow = filter (\(a,_,c) -> a /= s && c /= s) (at^.transition)
+    go ri@(ra,rb,rc) si@(sa,sb,sc)
+      | hasLoop s = let [(_,b,_)] = filter (\(a,_,c) -> a == s && c == s) (at^.transition) in (ra,rb :. ((:^*) b) :. sb,sc)
+      | otherwise = (ra,rb :. sb,sc)
+
+  checkInitLoop :: NAreg St -> NAreg St
+  checkInitLoop at
+    | hasLoop (at^.initial) =
+        let
+          [(_,b0,_)] = filter (\(a,_,c) -> a == at^.initial && c == at^.initial) (at^.transition)
+          [(_,b1,c)] = filter (\(_,_,c) -> c /= at^.initial) (at^.transition)
+        in
+        at & transition .~ [(at^.initial,(:^*) b0 :. b1,c)]
+    | otherwise = at
+
+  recurOnState :: NAreg St -> NAreg St
+  recurOnState at0 = at2 where
+    at2 = checkInitLoop $ unparallelExhly at1
+    at1 = go (at0^.state \\ (at0^.initial : at0^.final)) at0
+
+    go [] at = at
+    go (q:qs) at = go qs $ shortcut q $ unparallelExhly at
 
 buildNA :: (Eq s, Show s) => NA s -> String
 buildNA at = _data where
@@ -223,8 +321,9 @@ mainloop ref = do
   forM_ (zip [1..] (at ^. state)) $ \(i,q) -> do
     withElem ("delete-state-" ++ show i) $ \e -> do
       onEvent e Click $ \_ -> do
-        modifyIORef ref $ (state %~ delete q)
-        modifyIORef ref $ (transition %~ filter (\(q1,_,q2) -> q /= q1 && q /= q2))
+        modifyIORef ref $ state %~ delete q
+        modifyIORef ref $ transition %~ filter (\(q1,_,q2) -> q /= q1 && q /= q2)
+        modifyIORef ref $ final %~ delete q
 
         mainloop ref
 
@@ -330,13 +429,25 @@ mainloop ref = do
 
   withElem "conversion-table-tbody" $ \e -> do
     at <- readIORef ref
-    setProp e "innerHTML" $ conversionTableHTML $ fmap (\(x,_) -> x) conversionTable
+    setProp e "innerHTML" $ conversionTableHTML conversionTable
 
-    forM_ (zip [1..] conversionTable) $ \(i,(k,f)) -> do
-      withElem ("convert-" ++ show i) $ \t -> do
-        onEvent t Click $ \_ -> do
-          modifyIORef ref $ convertNA showStrList . f
-          mainloop ref
+    -- NFA to DFA
+    withElem ("convert-1") $ \t -> do
+      onEvent t Click $ \_ -> do
+        modifyIORef ref $ convertNA showStrList . convertNFAtoDFA
+        mainloop ref
+
+    -- NFA to DFA
+    withElem ("convert-2") $ \t -> do
+      onEvent t Click $ \_ -> do
+        at <- readIORef ref
+        withElem "alert-area" $ \e -> do
+          setProp e "innerHTML" $
+            "<div class=\"alert alert-warning alert-dismissible\" role=\"alert\">"
+            ++ "<button type=\"button\" class=\"close\" data-dismiss=\"alert\" aria-label=\"Close\"><span aria-hidden=\"true\">&times;</span></button>"
+            ++ "<strong>RegExp:</strong> " ++ show (convertNFAtoRE at)
+            ++ "</div>"
+
 
   return ()
 
@@ -348,13 +459,12 @@ exampleTable = [
   ("exmple1", "NFA", "{\"final\":[\"q3\"],\"initial\":\"q0\",\"transition\":[[\"q0\",\"a\",\"q1\"],[\"q0\",\"b\",\"q2\"],[\"q1\",\"a\",\"q3\"],[\"q2\",\"a\",\"q2\"],[\"q2\",\"b\",\"q3\"],[\"q3\",\"b\",\"q3\"]],\"alphabet\":\"ab\",\"state\":[\"q0\",\"q1\",\"q2\",\"q3\"]}"),
   ("exmple2", "NFA", "{\"final\":[\"q3\"],\"initial\":\"q0\",\"transition\":[[\"q0\",\"a\",\"q0\"],[\"q0\",\"b\",\"q0\"],[\"q0\",\"b\",\"q1\"],[\"q1\",\"a\",\"q2\"],[\"q2\",\"a\",\"q3\"],[\"q2\",\"b\",\"q3\"]],\"alphabet\":\"ab\",\"state\":[\"q0\",\"q1\",\"q2\",\"q3\"]}"),
   ("worst NFAtoDFA efficiency", "NFA", "{\"final\":[\"q3\"],\"initial\":\"q0\",\"transition\":[[\"q0\",\"a\",\"q0\"],[\"q0\",\"b\",\"q0\"],[\"q0\",\"a\",\"q1\"],[\"q1\",\"a\",\"q2\"],[\"q1\",\"b\",\"q2\"],[\"q2\",\"a\",\"q3\"],[\"q2\",\"b\",\"q3\"]],\"alphabet\":\"ab\",\"state\":[\"q0\",\"q1\",\"q2\",\"q3\"]}"),
-  ("multiple of 3", "DFA", "{\"final\":[\"q0\",\"q3\"],\"initial\":\"q0\",\"transition\":[[\"q0\",\"0\",\"q0\"],[\"q0\",\"1\",\"q1\"],[\"q1\",\"1\",\"q0\"],[\"q1\",\"0\",\"q2\"],[\"q2\",\"0\",\"q1\"],[\"q2\",\"1\",\"q2\"]],\"alphabet\":\"01\",\"state\":[\"q0\",\"q1\",\"q2\"]}")
+  ("multiple of 3", "DFA", "{\"final\":[\"q0\"],\"initial\":\"q0\",\"transition\":[[\"q0\",\"0\",\"q0\"],[\"q0\",\"1\",\"q1\"],[\"q1\",\"1\",\"q0\"],[\"q1\",\"0\",\"q2\"],[\"q2\",\"0\",\"q1\"],[\"q2\",\"1\",\"q2\"]],\"alphabet\":\"01\",\"state\":[\"q0\",\"q1\",\"q2\"]}"),
+  ("a*b", "NFA", "{\"final\":[\"q1\"],\"initial\":\"q0\",\"transition\":[[\"q0\",\"a\",\"q0\"],[\"q0\",\"b\",\"q1\"]],\"alphabet\":\"ab\",\"state\":[\"q0\",\"q1\"]}")
   ]
 
-conversionTable :: [(String,(Eq s, Ord s) => NA s -> NA [s])]
-conversionTable = [
-  ("NFAtoDFA", convertNFAtoDFA)
-  ]
+conversionTable :: [String]
+conversionTable = ["NFAtoDFA", "NFAtoRegExp"]
 
 main = do
   let Right auto = fromJSON =<< decodeJSON (toJSString $ (\(_,_,c) -> c) $ exampleTable !! 0)
